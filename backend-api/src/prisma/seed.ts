@@ -481,8 +481,67 @@ async function main() {
     console.log(`  Mentor ${m + 1}: ${end - start} students assigned`);
   }
 
+  // ── Phase 13: Tasks ──
+
+  console.log('\nSeeding tasks...');
+  const TASK_DEFS = [
+    { title: 'Complete TypeScript exercises', description: 'Finish all exercises from chapters 1-5.', deadlineType: 'FIXED' as const, dayOffset: 7, isMandatory: true, isInternal: false, maxMarks: null },
+    { title: 'Submit project proposal', description: 'Draft and submit a proposal for the final project.', deadlineType: 'TENTATIVE' as const, dayOffset: 14, deadlineNote: 'Approximately mid-October', isMandatory: true, isInternal: true, maxMarks: 50 },
+    { title: 'Set up CI/CD pipeline', description: null, deadlineType: 'TBD' as const, dayOffset: null, deadlineNote: 'Waiting on infra team', isMandatory: true, isInternal: false, maxMarks: null },
+    { title: 'Contribute to open-source project', description: 'Find an open-source project and make a contribution.', deadlineType: 'NONE' as const, dayOffset: null, isMandatory: false, isInternal: false, maxMarks: null },
+    { title: 'Database normalization worksheet', description: 'Complete the normalization worksheet handed out in class.', deadlineType: 'FIXED' as const, dayOffset: 5, isMandatory: true, isInternal: true, maxMarks: 25 },
+    { title: 'Peer code review', description: null, deadlineType: 'TENTATIVE' as const, dayOffset: 10, deadlineNote: 'Around end of week 2', isMandatory: false, isInternal: false, maxMarks: null },
+  ];
+
+  let taskCount = 0;
+  const taskIds: string[] = [];
+
+  for (let i = 0; i < TASK_DEFS.length; i++) {
+    const def = TASK_DEFS[i];
+    const targetBatchIds = [batchIds[i % batchIds.length]];
+    if (i % 3 === 0 && batchIds.length > 1) {
+      targetBatchIds.push(batchIds[(i + 1) % batchIds.length]);
+    }
+    const trainerId = trainerIds[i % trainerIds.length];
+
+    const task = await prisma.task.create({
+      data: {
+        createdById: trainerId,
+        title: def.title,
+        description: def.description,
+        isMandatory: def.isMandatory,
+        isInternal: def.isInternal,
+        maxMarks: def.maxMarks,
+        deadlineType: def.deadlineType,
+        deadline: def.dayOffset !== null ? dateOffset(def.dayOffset) : null,
+        deadlineNote: (def as any).deadlineNote ?? null,
+        taskBatches: {
+          create: targetBatchIds.map((bid) => ({ batchId: bid })),
+        },
+      },
+    });
+    taskIds.push(task.id);
+
+    if (def.isMandatory) {
+      const members = await prisma.batchMember.findMany({
+        where: { batchId: { in: targetBatchIds } },
+        select: { studentId: true },
+      });
+      const uniqueIds = [...new Set(members.map((m) => m.studentId))];
+      if (uniqueIds.length > 0) {
+        await prisma.taskSubmission.createMany({
+          data: uniqueIds.map((sid) => ({ taskId: task.id, studentId: sid })),
+        });
+      }
+    }
+
+    taskCount++;
+    console.log(`  Task: ${def.title} (${def.deadlineType}, ${targetBatchIds.length} batches)`);
+  }
+  console.log(`  ${taskCount} tasks created.`);
+
   console.log('\nSeed completed successfully.');
-  console.log(`  Summary: ${studentIds.length} students, ${batchIds.length} batches, ${sessionIds.length} sessions, ${attendanceCount} attendance, ${scoreCount} assessment results, ${feedbackCount} feedback, ${mentorIds.length} mentors with assignments`);
+  console.log(`  Summary: ${studentIds.length} students, ${batchIds.length} batches, ${sessionIds.length} sessions, ${attendanceCount} attendance, ${scoreCount} assessment results, ${feedbackCount} feedback, ${mentorIds.length} mentors with assignments, ${taskCount} tasks`);
 }
 
 main()
